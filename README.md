@@ -21,10 +21,10 @@ The right screen shows at the right time, derived purely from the clock — ther
 | Daily tally | **pg_cron** at 12:50 SAST (with a lazy fallback in the API) |
 | Anonymity & all rules | One **Supabase Edge Function** (`api`) using the service role — names are never sent before results |
 | Identity | A per-person secret `token` in the URL (no accounts) |
-| Frontend | One static page (`web/`), hosted on **GitHub Pages** |
+| Frontend | One static page (`docs/`), hosted on **GitHub Pages** |
 
 ```
-web/                      static single-page app (deploy to GitHub Pages)
+docs/                     static single-page app (served by GitHub Pages)
   index.html, app.js, styles.css, config.js
 supabase/
   migrations/0001_init.sql   tables + finalize_contest()
@@ -35,16 +35,27 @@ scripts/
   list_links.sql             reprint everyone's link
 ```
 
-## Deploy (one-time)
+## Status — backend is live
 
-1. **Supabase project** — create one, then apply both migrations in `supabase/migrations/`.
-2. **Storage** — create a **private** bucket named `photos`.
-3. **Edge function** — deploy `supabase/functions/api` with **`verify_jwt = false`** (it does its own token auth). It uses the built-in `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` env vars.
-4. **Players** — edit names into `scripts/seed_players.sql`, run it, then run `scripts/list_links.sql` to get each person's link.
-5. **Frontend config** — set `SUPABASE_URL` and `ANON_KEY` in `web/config.js` (both are public-safe).
-6. **Host** — enable **GitHub Pages** for this repo, serving the `web/` folder. Each personal link is
-   `https://<you>.github.io/Photocompetition/?t=<token>`.
-7. **Share** — send each person their link once; they bookmark it. Done.
+The Supabase project `best-photo-of-the-day` is provisioned and configured:
+schema + `finalize_contest()`, the `pg_cron` tally (12:50 SAST), a private `photos`
+bucket, the `api` edge function (`verify_jwt = false`), the 15 players seeded, and
+`docs/config.js` filled in with the project URL + publishable key.
+
+**The one remaining manual step is turning on GitHub Pages** (the app's hosting):
+
+1. Repo **Settings → Pages**.
+2. **Source: Deploy from a branch.**
+3. **Branch:** `claude/family-photo-competition-fe5ukd`, **Folder:** `/docs`. Save.
+4. After a minute the site is live at `https://timjug.github.io/Photocompetition/`.
+5. **Share** each person their personal link (`…/?t=<token>`) once; they bookmark it. Done.
+
+### Re-running setup from scratch
+1. Apply both migrations in `supabase/migrations/`.
+2. Create a **private** Storage bucket named `photos`.
+3. Deploy `supabase/functions/api` with **`verify_jwt = false`** (uses the built-in `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY`).
+4. Edit names into `scripts/seed_players.sql`, run it, then `scripts/list_links.sql` for the links.
+5. Put `SUPABASE_URL` + the publishable/anon key in `docs/config.js` (both public-safe).
 
 ## Design notes
 

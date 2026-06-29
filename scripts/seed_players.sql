@@ -29,6 +29,6 @@ on conflict do nothing;
 
 -- Each person's link (replace the base URL with your deployed site):
 select name,
-       'https://YOURNAME.github.io/Photocompetition/?t=' || token as personal_link
+       'https://timjug.github.io/Photocompetition/?t=' || token as personal_link
 from players
 order by created_at;
