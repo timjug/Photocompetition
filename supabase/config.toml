@@ -1,0 +1,4 @@
+# Minimal Supabase config. The API function does its own token auth,
+# so JWT verification must be OFF for it.
+[functions.api]
+verify_jwt = false

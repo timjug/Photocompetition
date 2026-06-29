@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#0f172a" />
+    <title>📷 Best Photo of the Day</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header>
+      <h1>📷 Best Photo of the Day</h1>
+      <div id="who" class="who"></div>
+    </header>
+
+    <main id="app">
+      <div class="card loading">Loading…</div>
+    </main>
+
+    <nav class="tabs">
+      <button data-tab="home" class="active">Today</button>
+      <button data-tab="hof">🏆 Hall of Fame</button>
+    </nav>
+
+    <footer>
+      <span>Submit by 11:00am · Vote 11:05am · Winner 1:00pm (SAST)</span>
+    </footer>
+
+    <script src="config.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>
