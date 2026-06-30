@@ -104,6 +104,7 @@ async function playerFromToken(token: string) {
 
 async function signed(path: string | null): Promise<string | null> {
   if (!path) return null;
+  if (/^https?:\/\//.test(path)) return path; // backfilled winners hosted on the site
   const { data } = await db.storage.from(BUCKET).createSignedUrl(path, SIGNED_URL_TTL);
   return data?.signedUrl ?? null;
 }
