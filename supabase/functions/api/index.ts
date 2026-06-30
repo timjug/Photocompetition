@@ -117,27 +117,61 @@ function shuffle<T>(arr: T[]): T[] {
 
 async function resultsFor(comp: string, contest_date: string) {
   await db.rpc("finalize_contest", { p_comp: comp, p_date: contest_date });
-  const { data: wins } = await db
-    .from("winners")
-    .select("player_id, photo_path, caption, vote_count, is_cowinner")
+
+  // Get all submissions
+  const { data: subs } = await db
+    .from("submissions")
+    .select("id, player_id, photo_path, caption")
     .eq("competition", comp)
     .eq("contest_date", contest_date);
-  if (!wins || wins.length === 0) return { contest_date, winners: [] };
-  const winners = await Promise.all(
-    wins.map(async (w) => {
-      const { data: mem } = w.player_id
-        ? await db.from("players").select("name").eq("id", w.player_id).maybeSingle()
+
+  if (!subs || subs.length === 0) return { contest_date, winners: [] };
+
+  // Get vote counts for each submission
+  const { data: voteCounts } = await db
+    .from("votes")
+    .select("submission_id")
+    .eq("competition", comp)
+    .eq("contest_date", contest_date);
+
+  const voteCountMap = new Map<string, number>();
+  (voteCounts ?? []).forEach((v: any) => {
+    voteCountMap.set(v.submission_id, (voteCountMap.get(v.submission_id) ?? 0) + 1);
+  });
+
+  // Get winners
+  const { data: winnerIds } = await db
+    .from("winners")
+    .select("player_id")
+    .eq("competition", comp)
+    .eq("contest_date", contest_date);
+
+  const winnerPlayerIds = new Set((winnerIds ?? []).map((w: any) => w.player_id));
+
+  // Build results
+  const results = await Promise.all(
+    subs.map(async (s) => {
+      const { data: mem } = s.player_id
+        ? await db.from("players").select("name").eq("id", s.player_id).maybeSingle()
         : { data: null };
       return {
         name: mem?.name ?? "Unknown",
-        caption: w.caption,
-        votes: w.vote_count,
-        cowinner: w.is_cowinner,
-        image_url: await signed(w.photo_path),
+        caption: s.caption,
+        votes: voteCountMap.get(s.id) ?? 0,
+        isWinner: winnerPlayerIds.has(s.player_id),
+        image_url: await signed(s.photo_path),
       };
     }),
   );
-  return { contest_date, winners };
+
+  // Sort: winners first (by votes desc), then others (by votes desc, then name)
+  results.sort((a, b) => {
+    if (a.isWinner !== b.isWinner) return a.isWinner ? -1 : 1;
+    if (b.votes !== a.votes) return b.votes - a.votes;
+    return a.name.localeCompare(b.name);
+  });
+
+  return { contest_date, winners: results };
 }
 
 async function handleState(

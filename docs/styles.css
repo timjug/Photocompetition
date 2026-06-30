@@ -131,6 +131,13 @@ textarea {
 .winner .name { font-weight: 700; }
 .winner .votes { color: var(--muted); font-size: 0.85rem; }
 .crown { font-size: 1.4rem; }
+.result-row { display: flex; gap: 12px; align-items: center; padding: 10px 0; border-top: 1px solid var(--line); }
+.result-row:first-of-type { border-top: none; }
+.result-row img { width: 64px; height: 64px; object-fit: cover; border-radius: 10px; flex-shrink: 0; }
+.result-meta { flex: 1; min-width: 0; }
+.result-name { font-weight: 600; }
+.result-caption { color: var(--muted); font-size: 0.85rem; margin-top: 2px; }
+.result-votes { font-weight: 700; color: var(--accent); min-width: 30px; text-align: right; }
 .date-h { color: var(--accent); font-weight: 700; margin: 18px 0 4px; }
 
 .toast {

@@ -107,8 +107,10 @@ function resizeImage(file, maxEdge = 1600, quality = 0.8) {
 // --- screens ----------------------------------------------------------------
 function latestResultCard(latest) {
   if (!latest || !latest.winners || latest.winners.length === 0) return "";
-  const many = latest.winners.length > 1;
-  const items = latest.winners
+  const winners = latest.winners.filter((w) => w.isWinner);
+  const allSubmissions = latest.winners;
+  const many = winners.length > 1;
+  const winnerItems = winners
     .map(
       (w) => `
       <div class="winner">
@@ -121,9 +123,24 @@ function latestResultCard(latest) {
       </div>`,
     )
     .join("");
+  const otherItems = allSubmissions
+    .filter((w) => !w.isWinner)
+    .map(
+      (w) => `
+      <div class="result-row">
+        ${w.image_url ? `<img src="${w.image_url}" alt="">` : ""}
+        <div class="result-meta">
+          <div class="result-name">${esc(w.name)}</div>
+          ${w.caption ? `<div class="result-caption">${esc(w.caption)}</div>` : ""}
+        </div>
+        <div class="result-votes">${w.votes}</div>
+      </div>`,
+    )
+    .join("");
   return `<div class="card">
-    <div class="headline">${many ? "🏆 Co-winners" : "🏆 Latest winner"} · ${prettyDate(latest.contest_date)}</div>
-    ${items}
+    <div class="headline">${many ? "🏆 Co-winners" : "🏆 Winner"} · ${prettyDate(latest.contest_date)}</div>
+    ${winnerItems}
+    ${otherItems ? `<div class="headline" style="margin-top: 16px; font-size: 0.95rem; font-weight: 600;">Other votes</div>${otherItems}` : ""}
   </div>`;
 }
 
