@@ -159,7 +159,7 @@ textarea {
 .lb-row:first-of-type { border-top: none; }
 .lb-rank { width: 32px; text-align: center; font-size: 1.1rem; }
 .lb-name { flex: 1; font-weight: 700; }
-.lb-sub { color: var(--muted); font-size: 0.82rem; }
+.lb-sub { color: var(--muted); font-size: 0.82rem; text-shadow: 0 0 3px rgba(255,255,255,0.4); }
 .lb-wins { font-weight: 800; color: var(--accent); min-width: 24px; text-align: right; }
 
 /* admin */
