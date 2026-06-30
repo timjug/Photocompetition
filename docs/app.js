@@ -186,39 +186,59 @@ function renderVote(s) {
   }
   const card = el(`<div class="card">
     <div class="banner vote">🗳️ Voting is open — until 12:50pm</div>
-    <div class="headline">Pick the best photo</div>
-    <p class="sub">Anonymous. Tap a photo to vote — you can change it until 12:50pm. Winner at 1:00pm.</p>
+    <div class="headline">Pick the best</div>
+    <p class="sub" id="votestatus"></p>
     <div class="grid"></div>
   </div>`);
   const grid = card.querySelector(".grid");
+  const status = card.querySelector("#votestatus");
   let selected = s.yourVote || null;
 
+  // Update markers/labels without re-fetching, so the chosen photo never jumps or vanishes.
+  function refresh() {
+    grid.classList.toggle("voted", !!selected);
+    grid.querySelectorAll(".tile").forEach((t) => {
+      const sel = t.dataset.id === selected;
+      const own = t.dataset.own === "1";
+      t.classList.toggle("selected", sel);
+      const tag = t.querySelector(".tag");
+      if (sel) tag.textContent = "✓ Your vote";
+      else if (own) tag.textContent = "Your photo";
+      else tag.textContent = t.dataset.caption || "";
+      tag.style.display = sel || own || t.dataset.caption ? "block" : "none";
+    });
+    status.textContent = selected
+      ? "✓ You voted for the highlighted photo. Tap another to change it (until 12:50pm)."
+      : "Anonymous — tap a photo to vote. You can change it until 12:50pm. Winner at 1:00pm.";
+  }
+
   ballot.forEach((b) => {
-    const tile = el(`<div class="tile ${b.isOwn ? "own" : ""} ${selected === b.id ? "selected" : ""}" data-id="${b.id}">
+    const tile = el(`<div class="tile ${b.isOwn ? "own" : ""}" data-id="${b.id}" data-own="${
+      b.isOwn ? "1" : "0"
+    }" data-caption="${esc(b.caption || "")}">
       ${b.image_url ? `<img src="${b.image_url}" alt="">` : ""}
       <div class="check">✓</div>
-      ${b.isOwn ? `<div class="tag">Your photo</div>` : b.caption ? `<div class="tag">${esc(b.caption)}</div>` : ""}
+      <div class="tag"></div>
     </div>`);
     if (!b.isOwn) {
       tile.addEventListener("click", async () => {
         const prev = selected;
-        grid.querySelectorAll(".tile").forEach((t) => t.classList.remove("selected"));
-        tile.classList.add("selected");
         selected = b.id;
+        refresh();
         try {
           await api("vote", { submission_id: b.id });
           toast("Vote saved ✅");
         } catch (e) {
           toast(e.message);
-          tile.classList.remove("selected");
-          if (prev) grid.querySelector(`.tile[data-id="${prev}"]`)?.classList.add("selected");
           selected = prev;
+          refresh();
         }
       });
     }
     grid.appendChild(tile);
   });
   app.appendChild(card);
+  refresh();
 }
 
 function renderWaiting(title, msg, s) {
