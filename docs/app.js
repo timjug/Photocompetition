@@ -273,6 +273,8 @@ function renderResults(s) {
 }
 
 async function renderHallOfFame() {
+  updateHeader();
+  renderSwitch();
   app.innerHTML = `<div class="card loading">Loading…</div>`;
   try {
     const { days } = await api("hall_of_fame");
@@ -315,7 +317,7 @@ function renderSwitch() {
   const host = document.getElementById("compswitch");
   if (!host) return;
   host.innerHTML = "";
-  if (COMPETITIONS.length < 2) return;
+  if (COMPETITIONS.length < 2 || CURRENT_TAB === "board" || CURRENT_TAB === "admin") return;
   COMPETITIONS.forEach((c) => {
     const b = el(`<button class="${c.slug === COMP ? "active" : ""}">${c.emoji} ${esc(c.name)}</button>`);
     b.addEventListener("click", () => {
@@ -349,6 +351,8 @@ async function load() {
       COMP = s.comp;
       localStorage.setItem("bpotd_comp", COMP);
     }
+    const adminTab = document.getElementById("adminTab");
+    if (adminTab) adminTab.hidden = !(s.you && s.you.is_admin);
     updateHeader();
     renderSwitch();
     whoEl.textContent = s.you ? `Hi, ${s.you.name}` : "";
@@ -361,6 +365,137 @@ async function load() {
   }
 }
 
+// --- leaderboard ------------------------------------------------------------
+async function renderLeaderboard() {
+  const h = document.querySelector("header h1");
+  if (h) h.textContent = "🏅 Leaderboard";
+  renderSwitch();
+  app.innerHTML = `<div class="card loading">Loading…</div>`;
+  try {
+    const { leaderboard, competitions } = await api("leaderboard");
+    app.innerHTML = "";
+    if (!leaderboard || leaderboard.length === 0) {
+      app.appendChild(el(`<div class="card center"><p class="sub">No wins recorded yet.</p></div>`));
+      return;
+    }
+    const card = el(`<div class="card"><div class="headline">🏅 All-time wins</div></div>`);
+    leaderboard.forEach((r, i) => {
+      const medal = i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : `${i + 1}.`;
+      const parts = competitions
+        .map((c) => (r.byComp[c.slug] ? `${c.emoji} ${r.byComp[c.slug]}` : null))
+        .filter(Boolean)
+        .join("  ");
+      card.appendChild(
+        el(`<div class="lb-row">
+          <span class="lb-rank">${medal}</span>
+          <span class="lb-name">${esc(r.name)}</span>
+          <span class="lb-sub">${parts}</span>
+          <span class="lb-wins">${r.wins}</span>
+        </div>`),
+      );
+    });
+    app.appendChild(card);
+  } catch (e) {
+    app.innerHTML = `<div class="card center"><p class="sub">${esc(e.message)}</p></div>`;
+  }
+}
+
+// --- admin (organiser only) -------------------------------------------------
+async function renderAdmin() {
+  const h = document.querySelector("header h1");
+  if (h) h.textContent = "⚙️ Organiser";
+  renderSwitch();
+  app.innerHTML = `<div class="card loading">Loading…</div>`;
+  let data;
+  try {
+    data = await api("admin_overview");
+  } catch (e) {
+    app.innerHTML = `<div class="card center"><p class="sub">${esc(e.message)}</p></div>`;
+    return;
+  }
+  app.innerHTML = "";
+
+  data.competitions.forEach((c) => {
+    const card = el(`<div class="card">
+      <div class="headline">${c.emoji} ${esc(c.name)} — ${c.count} ${c.count === 1 ? "entry" : "entries"}</div>
+      <p class="sub">${prettyDate(data.date)}</p>
+    </div>`);
+    if (c.entries.length === 0) card.appendChild(el(`<p class="sub">No entries yet.</p>`));
+    c.entries.forEach((en) => {
+      const row = el(`<div class="adm-row">
+        ${en.image_url ? `<img src="${en.image_url}" alt="">` : `<div class="adm-noimg"></div>`}
+        <div class="adm-meta"><div class="name">${esc(en.name)}</div>${
+        en.caption ? `<div class="muted">${esc(en.caption)}</div>` : ""
+      }</div>
+        <button class="sm danger">Remove</button>
+      </div>`);
+      row.querySelector("button").addEventListener("click", async () => {
+        if (!confirm(`Remove ${en.name}'s entry?`)) return;
+        try {
+          await api("admin_remove_submission", { submission_id: en.submission_id });
+          toast("Entry removed");
+          renderAdmin();
+        } catch (e) {
+          toast(e.message);
+        }
+      });
+      card.appendChild(row);
+    });
+    app.appendChild(card);
+  });
+
+  const origin = location.origin + location.pathname;
+  const people = el(`<div class="card">
+    <div class="headline">👪 People (${data.players.length})</div>
+    <div class="adm-add"><input id="newname" placeholder="Add a person — their name"><button id="addbtn">Add</button></div>
+  </div>`);
+  data.players.forEach((pl) => {
+    const link = `${origin}?t=${pl.token}`;
+    const row = el(`<div class="adm-row">
+      <div class="adm-meta">
+        <div class="name">${esc(pl.name)} ${pl.is_admin ? "⚙️" : ""} ${
+      pl.active ? "" : '<span class="muted">(inactive)</span>'
+    }</div>
+        <div class="muted link-line">${esc(link)}</div>
+      </div>
+      <button class="sm copy">Copy</button>
+      <button class="sm toggle ${pl.active ? "danger" : ""}">${pl.active ? "Remove" : "Restore"}</button>
+    </div>`);
+    row.querySelector(".copy").addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(link);
+        toast("Link copied");
+      } catch {
+        toast("Long-press the link to copy");
+      }
+    });
+    const tg = row.querySelector(".toggle");
+    if (pl.is_admin && pl.active) tg.disabled = true;
+    tg.addEventListener("click", async () => {
+      try {
+        await api("admin_set_active", { player_id: pl.id, active: !pl.active });
+        toast("Updated");
+        renderAdmin();
+      } catch (e) {
+        toast(e.message);
+      }
+    });
+    people.appendChild(row);
+  });
+  people.querySelector("#addbtn").addEventListener("click", async () => {
+    const name = people.querySelector("#newname").value.trim();
+    if (!name) return;
+    try {
+      const res = await api("admin_add_player", { name });
+      toast(`Added ${res.player.name}`);
+      renderAdmin();
+    } catch (e) {
+      toast(e.message);
+    }
+  });
+  app.appendChild(people);
+}
+
 // --- tabs -------------------------------------------------------------------
 document.querySelector(".tabs").addEventListener("click", (e) => {
   const btn = e.target.closest("button[data-tab]");
@@ -369,6 +504,8 @@ document.querySelector(".tabs").addEventListener("click", (e) => {
   btn.classList.add("active");
   CURRENT_TAB = btn.dataset.tab;
   if (CURRENT_TAB === "hof") renderHallOfFame();
+  else if (CURRENT_TAB === "board") renderLeaderboard();
+  else if (CURRENT_TAB === "admin") renderAdmin();
   else load();
 });
 

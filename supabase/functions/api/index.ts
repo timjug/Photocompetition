@@ -1,6 +1,7 @@
-// Best Photo / Best Tail End — single API edge function (multi-competition).
+// Best Photo / Best Tail End — single API edge function (multi-competition + admin).
 // Auth: each request carries the caller's personal secret `token` (validated server-side).
-// Most actions also carry `comp` (competition slug, e.g. "photo" or "tailend"); defaults to "photo".
+// Most actions also carry `comp` (competition slug); defaults to "photo".
+// Admin actions (admin_*) additionally require the caller's player.is_admin = true.
 // Uses the service-role client so anonymity is correct-by-construction.
 // Deploy with verify_jwt = false (own token auth).
 
@@ -67,6 +68,12 @@ function json(body: unknown, status = 200) {
   });
 }
 
+function hex(n: number) {
+  const a = new Uint8Array(n);
+  crypto.getRandomValues(a);
+  return [...a].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
 async function getCompetitions() {
   const { data } = await db
     .from("competitions")
@@ -76,7 +83,6 @@ async function getCompetitions() {
   return data ?? [];
 }
 
-// Resolve and validate the competition slug; falls back to the first active one.
 async function resolveComp(raw: unknown, comps: { slug: string }[]) {
   const want = typeof raw === "string" ? raw : "";
   if (comps.some((c) => c.slug === want)) return want;
@@ -87,16 +93,16 @@ async function playerFromToken(token: string) {
   if (!token) return null;
   const { data } = await db
     .from("players")
-    .select("id, name, active")
+    .select("id, name, active, is_admin")
     .eq("token", token)
     .maybeSingle();
   if (!data || !data.active) return null;
-  return data as { id: string; name: string; active: boolean };
+  return data as { id: string; name: string; active: boolean; is_admin: boolean };
 }
 
 async function signed(path: string | null): Promise<string | null> {
   if (!path) return null;
-  if (/^https?:\/\//.test(path)) return path; // backfilled winners hosted on the site
+  if (/^https?:\/\//.test(path)) return path;
   const { data } = await db.storage.from(BUCKET).createSignedUrl(path, SIGNED_URL_TTL);
   return data?.signedUrl ?? null;
 }
@@ -134,10 +140,14 @@ async function resultsFor(comp: string, contest_date: string) {
   return { contest_date, winners };
 }
 
-async function handleState(player: { id: string; name: string }, comp: string, comps: unknown[]) {
+async function handleState(
+  player: { id: string; name: string; is_admin: boolean },
+  comp: string,
+  comps: unknown[],
+) {
   const p = phaseInfo();
   const out: Record<string, unknown> = {
-    you: { name: player.name },
+    you: { name: player.name, is_admin: player.is_admin },
     competitions: comps,
     comp,
     phase: p.primary,
@@ -262,6 +272,100 @@ async function handleHallOfFame(comp: string) {
   return json({ comp, days });
 }
 
+// All-time most wins across every competition (each winner row counts; co-wins count for each).
+async function handleLeaderboard() {
+  const comps = await getCompetitions();
+  const { data: wins } = await db.from("winners").select("player_id, competition");
+  const { data: players } = await db.from("players").select("id, name");
+  const nameById = new Map((players ?? []).map((p) => [p.id, p.name]));
+  const agg = new Map<string, { wins: number; byComp: Record<string, number> }>();
+  for (const w of wins ?? []) {
+    if (!w.player_id) continue;
+    const a = agg.get(w.player_id) ?? { wins: 0, byComp: {} };
+    a.wins += 1;
+    a.byComp[w.competition] = (a.byComp[w.competition] ?? 0) + 1;
+    agg.set(w.player_id, a);
+  }
+  const rows = [...agg.entries()]
+    .map(([id, a]) => ({ name: nameById.get(id) ?? "Unknown", wins: a.wins, byComp: a.byComp }))
+    .sort((x, y) => y.wins - x.wins || x.name.localeCompare(y.name));
+  return json({ leaderboard: rows, competitions: comps });
+}
+
+// ----- Admin (caller is verified is_admin before these run) -----------------
+async function handleAdminOverview(player: { id: string }) {
+  const comps = await getCompetitions();
+  const p = phaseInfo();
+  const date = p.submitDate ?? p.voteDate ?? p.resultsDate;
+  const phase = p.primary;
+  const competitions = await Promise.all(
+    comps.map(async (c) => {
+      const { data: subs } = await db
+        .from("submissions")
+        .select("id, caption, photo_path, player_id, updated_at")
+        .eq("competition", c.slug)
+        .eq("contest_date", date);
+      const entries = await Promise.all(
+        (subs ?? []).map(async (sb) => {
+          const { data: mem } = await db
+            .from("players")
+            .select("name")
+            .eq("id", sb.player_id)
+            .maybeSingle();
+          return {
+            submission_id: sb.id,
+            name: mem?.name ?? "Unknown",
+            caption: sb.caption,
+            image_url: await signed(sb.photo_path),
+          };
+        }),
+      );
+      entries.sort((a, b) => a.name.localeCompare(b.name));
+      return { slug: c.slug, name: c.name, emoji: c.emoji, count: entries.length, entries };
+    }),
+  );
+  const { data: players } = await db
+    .from("players")
+    .select("id, name, token, active, is_admin")
+    .order("name");
+  return json({ date, phase, competitions, players, self_id: player.id });
+}
+
+async function handleAdminRemoveSubmission(body: any) {
+  const id: string = body.submission_id;
+  if (!id) return json({ error: "submission_id required" }, 400);
+  const { data: sb } = await db.from("submissions").select("id, photo_path").eq("id", id).maybeSingle();
+  if (!sb) return json({ error: "Submission not found." }, 404);
+  if (sb.photo_path && !/^https?:\/\//.test(sb.photo_path)) {
+    await db.storage.from(BUCKET).remove([sb.photo_path]);
+  }
+  const { error } = await db.from("submissions").delete().eq("id", id); // votes cascade
+  if (error) return json({ error: error.message }, 500);
+  return json({ ok: true });
+}
+
+async function handleAdminAddPlayer(body: any) {
+  const name = (body.name ?? "").toString().trim().slice(0, 40);
+  if (!name) return json({ error: "Name required." }, 400);
+  const { data, error } = await db
+    .from("players")
+    .insert({ name, token: hex(12) })
+    .select("id, name, token, active, is_admin")
+    .maybeSingle();
+  if (error) return json({ error: error.message }, 500);
+  return json({ ok: true, player: data });
+}
+
+async function handleAdminSetActive(player: { id: string }, body: any) {
+  const id: string = body.player_id;
+  const active = !!body.active;
+  if (!id) return json({ error: "player_id required" }, 400);
+  if (id === player.id && !active) return json({ error: "You can't deactivate yourself." }, 400);
+  const { error } = await db.from("players").update({ active }).eq("id", id);
+  if (error) return json({ error: error.message }, 500);
+  return json({ ok: true });
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
   if (req.method !== "POST") return json({ error: "POST only" }, 405);
@@ -275,10 +379,29 @@ Deno.serve(async (req) => {
   const comps = await getCompetitions();
   const comp = await resolveComp(body.comp, comps);
 
+  // Public (no token) actions.
   if (body.action === "hall_of_fame") return handleHallOfFame(comp);
+  if (body.action === "leaderboard") return handleLeaderboard();
 
   const player = await playerFromToken(body.token);
   if (!player) return json({ error: "Unknown or inactive link." }, 401);
+
+  // Admin-only actions.
+  if (typeof body.action === "string" && body.action.startsWith("admin_")) {
+    if (!player.is_admin) return json({ error: "Not allowed." }, 403);
+    switch (body.action) {
+      case "admin_overview":
+        return handleAdminOverview(player);
+      case "admin_remove_submission":
+        return handleAdminRemoveSubmission(body);
+      case "admin_add_player":
+        return handleAdminAddPlayer(body);
+      case "admin_set_active":
+        return handleAdminSetActive(player, body);
+      default:
+        return json({ error: "Unknown admin action" }, 400);
+    }
+  }
 
   switch (body.action) {
     case "state":
