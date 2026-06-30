@@ -125,9 +125,19 @@ async function resultsFor(comp: string, contest_date: string) {
     .eq("competition", comp)
     .eq("contest_date", contest_date);
 
-  if (!subs || subs.length === 0) return { contest_date, winners: [] };
+  // Get all winners (including manually-added hall of fame entries)
+  const { data: allWinners } = await db
+    .from("winners")
+    .select("player_id, photo_path, caption, vote_count")
+    .eq("competition", comp)
+    .eq("contest_date", contest_date);
 
-  // Get vote counts for each submission
+  // If no submissions and no winners, return empty
+  if ((!subs || subs.length === 0) && (!allWinners || allWinners.length === 0)) {
+    return { contest_date, winners: [] };
+  }
+
+  // Get vote counts for submissions
   const { data: voteCounts } = await db
     .from("votes")
     .select("submission_id")
@@ -139,18 +149,12 @@ async function resultsFor(comp: string, contest_date: string) {
     voteCountMap.set(v.submission_id, (voteCountMap.get(v.submission_id) ?? 0) + 1);
   });
 
-  // Get winners
-  const { data: winnerIds } = await db
-    .from("winners")
-    .select("player_id")
-    .eq("competition", comp)
-    .eq("contest_date", contest_date);
+  const winnerPlayerIds = new Set((allWinners ?? []).map((w: any) => w.player_id));
+  const submissionPlayerIds = new Set((subs ?? []).map((s: any) => s.player_id));
 
-  const winnerPlayerIds = new Set((winnerIds ?? []).map((w: any) => w.player_id));
-
-  // Build results
+  // Build results from submissions
   const results = await Promise.all(
-    subs.map(async (s) => {
+    (subs ?? []).map(async (s) => {
       const { data: mem } = s.player_id
         ? await db.from("players").select("name").eq("id", s.player_id).maybeSingle()
         : { data: null };
@@ -163,6 +167,26 @@ async function resultsFor(comp: string, contest_date: string) {
       };
     }),
   );
+
+  // Add winners that don't have submissions (manually-added hall of fame entries)
+  const manualWinners = await Promise.all(
+    (allWinners ?? [])
+      .filter((w: any) => !submissionPlayerIds.has(w.player_id))
+      .map(async (w: any) => {
+        const { data: mem } = w.player_id
+          ? await db.from("players").select("name").eq("id", w.player_id).maybeSingle()
+          : { data: null };
+        return {
+          name: mem?.name ?? "Unknown",
+          caption: w.caption,
+          votes: w.vote_count,
+          isWinner: true,
+          image_url: await signed(w.photo_path),
+        };
+      }),
+  );
+
+  results.push(...manualWinners);
 
   // Sort: winners first (by votes desc), then others (by votes desc, then name)
   results.sort((a, b) => {
