@@ -64,6 +64,23 @@ function prettyDate(d) {
   const dt = new Date(d + "T00:00:00");
   return dt.toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long" });
 }
+// Show points with halves as ½ (e.g. 0.5 -> "½", 1.5 -> "1½", 2 -> "2").
+function fmtPoints(n) {
+  const whole = Math.floor(n);
+  if (n - whole >= 0.5) return whole > 0 ? `${whole}½` : "½";
+  return String(whole);
+}
+// "Who's voted" panel (names only — never reveals choices).
+function votersHTML(voted, pending) {
+  const total = voted.length + pending.length;
+  return `<div class="headline">🗳️ Who's voted — ${voted.length}/${total}</div>
+    <p class="sub"><b>Voted:</b> ${voted.length ? voted.map(esc).join(", ") : "—"}</p>
+    ${
+      pending.length
+        ? `<p class="sub"><b>Still to vote:</b> ${pending.map(esc).join(", ")}</p>`
+        : `<p class="sub">🎉 Everyone has voted!</p>`
+    }`;
+}
 
 // Resize a chosen image to <=1600px longest edge, JPEG ~0.8, return data URL.
 function resizeImage(file, maxEdge = 1600, quality = 0.8) {
@@ -182,6 +199,11 @@ function renderVote(s) {
       </div>`),
     );
     app.insertAdjacentHTML("beforeend", latestResultCard(s.latestResult));
+    if (s.voters) {
+      const pc = el(`<div class="card"></div>`);
+      pc.innerHTML = votersHTML(s.voters.voted, s.voters.pending);
+      app.appendChild(pc);
+    }
     return;
   }
   const card = el(`<div class="card">
@@ -193,6 +215,20 @@ function renderVote(s) {
   const grid = card.querySelector(".grid");
   const status = card.querySelector("#votestatus");
   let selected = s.yourVote || null;
+  const meName = s.you && s.you.name;
+  let voted = s.voters ? s.voters.voted.slice() : [];
+  let pending = s.voters ? s.voters.pending.slice() : [];
+  const partCard = el(`<div class="card"></div>`);
+  function renderPart() {
+    partCard.innerHTML = votersHTML(voted, pending);
+  }
+  function markMeVoted() {
+    if (meName && pending.includes(meName)) {
+      pending = pending.filter((n) => n !== meName);
+      voted = [...voted, meName].sort();
+      renderPart();
+    }
+  }
 
   // Update markers/labels without re-fetching, so the chosen photo never jumps or vanishes.
   function refresh() {
@@ -228,6 +264,7 @@ function renderVote(s) {
         try {
           await api("vote", { submission_id: b.id });
           toast("Vote saved ✅");
+          markMeVoted();
         } catch (e) {
           toast(e.message);
           selected = prev;
@@ -239,6 +276,8 @@ function renderVote(s) {
   });
   app.appendChild(card);
   refresh();
+  renderPart();
+  app.appendChild(partCard);
 }
 
 function renderWaiting(title, msg, s) {
@@ -385,7 +424,7 @@ async function renderLeaderboard() {
     leaderboard.forEach((r, i) => {
       const medal = i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : `${i + 1}.`;
       const parts = competitions
-        .map((c) => (r.byComp[c.slug] ? `${c.emoji} ${r.byComp[c.slug]}` : null))
+        .map((c) => (r.byComp[c.slug] ? `${c.emoji} ${fmtPoints(r.byComp[c.slug])}` : null))
         .filter(Boolean)
         .join("  ");
       card.appendChild(
@@ -393,7 +432,7 @@ async function renderLeaderboard() {
           <span class="lb-rank">${medal}</span>
           <span class="lb-name">${esc(r.name)}</span>
           <span class="lb-sub">${parts}</span>
-          <span class="lb-wins">${r.wins}</span>
+          <span class="lb-wins">${fmtPoints(r.wins)}</span>
         </div>`),
       );
     });

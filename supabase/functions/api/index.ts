@@ -203,6 +203,18 @@ async function handleState(
     );
     out.ballot = shuffle(ballot);
     out.votableCount = ballot.filter((b) => !b.isOwn).length;
+
+    // Who has voted (names only — never reveals choices). Visible to everyone.
+    const { data: activePlayers } = await db.from("players").select("id, name").eq("active", true);
+    const { data: voteRows } = await db
+      .from("votes")
+      .select("voter_player_id")
+      .eq("competition", comp)
+      .eq("contest_date", p.voteDate);
+    const votedIds = new Set((voteRows ?? []).map((v) => v.voter_player_id));
+    const voted = (activePlayers ?? []).filter((pl) => votedIds.has(pl.id)).map((pl) => pl.name).sort();
+    const pending = (activePlayers ?? []).filter((pl) => !votedIds.has(pl.id)).map((pl) => pl.name).sort();
+    out.voters = { voted, pending };
   }
 
   out.latestResult = await resultsFor(comp, p.resultsDate);
