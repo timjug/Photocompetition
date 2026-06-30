@@ -18,6 +18,11 @@ function getToken() {
 }
 const TOKEN = getToken();
 
+// --- competition state ------------------------------------------------------
+let COMP = localStorage.getItem("bpotd_comp") || "photo";
+let COMPETITIONS = [];
+let CURRENT_TAB = "home";
+
 // --- api --------------------------------------------------------------------
 async function api(action, extra = {}) {
   const res = await fetch(API, {
@@ -27,7 +32,7 @@ async function api(action, extra = {}) {
       apikey: CONFIG.ANON_KEY,
       Authorization: `Bearer ${CONFIG.ANON_KEY}`,
     },
-    body: JSON.stringify({ action, token: TOKEN, ...extra }),
+    body: JSON.stringify({ action, token: TOKEN, comp: COMP, ...extra }),
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || `Error ${res.status}`);
@@ -280,6 +285,32 @@ async function renderHallOfFame() {
   }
 }
 
+// --- competition switcher ---------------------------------------------------
+function updateHeader() {
+  const c = COMPETITIONS.find((x) => x.slug === COMP);
+  const h = document.querySelector("header h1");
+  if (c && h) h.textContent = `${c.emoji} ${c.name}`;
+}
+function renderSwitch() {
+  const host = document.getElementById("compswitch");
+  if (!host) return;
+  host.innerHTML = "";
+  if (COMPETITIONS.length < 2) return;
+  COMPETITIONS.forEach((c) => {
+    const b = el(`<button class="${c.slug === COMP ? "active" : ""}">${c.emoji} ${esc(c.name)}</button>`);
+    b.addEventListener("click", () => {
+      if (c.slug === COMP) return;
+      COMP = c.slug;
+      localStorage.setItem("bpotd_comp", COMP);
+      updateHeader();
+      renderSwitch();
+      if (CURRENT_TAB === "hof") renderHallOfFame();
+      else load();
+    });
+    host.appendChild(b);
+  });
+}
+
 // --- main load --------------------------------------------------------------
 async function load() {
   if (!TOKEN) {
@@ -293,6 +324,13 @@ async function load() {
   app.innerHTML = `<div class="card loading">Loading…</div>`;
   try {
     const s = await api("state");
+    if (s.competitions) COMPETITIONS = s.competitions;
+    if (s.comp) {
+      COMP = s.comp;
+      localStorage.setItem("bpotd_comp", COMP);
+    }
+    updateHeader();
+    renderSwitch();
     whoEl.textContent = s.you ? `Hi, ${s.you.name}` : "";
     if (s.phase === "submit") renderSubmit(s);
     else if (s.phase === "vote") renderVote(s);
@@ -309,7 +347,8 @@ document.querySelector(".tabs").addEventListener("click", (e) => {
   if (!btn) return;
   document.querySelectorAll(".tabs button").forEach((b) => b.classList.remove("active"));
   btn.classList.add("active");
-  if (btn.dataset.tab === "hof") renderHallOfFame();
+  CURRENT_TAB = btn.dataset.tab;
+  if (CURRENT_TAB === "hof") renderHallOfFame();
   else load();
 });
 

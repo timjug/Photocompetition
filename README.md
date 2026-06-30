@@ -13,6 +13,13 @@ each person just opens their **personal link**.
 
 The right screen shows at the right time, derived purely from the clock — there's no daily admin.
 
+### Two competitions in one app
+Two parallel daily competitions share the same links, schedule, players, and rules:
+**📷 Best Photo of the Day** and **🐾 Best Tail End** (best animal-butt photo). A switcher at the
+top flips between them; each person can enter (and vote in) both every day, and each has its own
+winner and Hall of Fame. They're separated by a `competition` slug in the data — adding a third
+later is a single row in the `competitions` table.
+
 ## How it's built
 
 | Piece | Tech |
