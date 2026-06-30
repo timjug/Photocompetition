@@ -48,6 +48,29 @@ function el(html) {
 function esc(s) {
   return (s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 }
+// --- lightbox: tap any photo to view it full-screen -------------------------
+let lightboxEl = null;
+function openLightbox(src) {
+  if (!src) return;
+  if (!lightboxEl) {
+    lightboxEl = el(`<div class="lightbox"><img alt=""><button class="lightbox-close" aria-label="Close">✕</button></div>`);
+    document.body.appendChild(lightboxEl);
+    lightboxEl.addEventListener("click", () => closeLightbox());
+  }
+  lightboxEl.querySelector("img").src = src;
+  lightboxEl.classList.add("show");
+}
+function closeLightbox() {
+  if (lightboxEl) lightboxEl.classList.remove("show");
+}
+// Any photo outside the voting grid opens the lightbox on tap.
+// Voting tiles use tap-to-vote, so they get their own 🔍 button instead (see renderVote).
+document.addEventListener("click", (e) => {
+  const img = e.target.closest("img");
+  if (!img || img.closest(".tile") || img.closest(".lightbox")) return;
+  openLightbox(img.src);
+});
+
 let toastTimer;
 function toast(msg) {
   let t = document.querySelector(".toast");
@@ -272,7 +295,12 @@ function renderVote(s) {
       ${b.image_url ? `<img src="${b.image_url}" alt="">` : ""}
       <div class="check">✓</div>
       <div class="tag"></div>
+      <button class="zoom" type="button" aria-label="Zoom photo">🔍</button>
     </div>`);
+    tile.querySelector(".zoom").addEventListener("click", (e) => {
+      e.stopPropagation();
+      openLightbox(b.image_url);
+    });
     if (!b.isOwn) {
       tile.addEventListener("click", async () => {
         const prev = selected;

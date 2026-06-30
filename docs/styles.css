@@ -194,3 +194,28 @@ footer {
 }
 .muted { color: var(--muted); }
 .center { text-align: center; }
+
+/* tappable photos */
+.winner img, .result-row img, .adm-row img, .preview { cursor: zoom-in; }
+.tile .zoom {
+  position: absolute; top: 6px; left: 6px; width: 30px; height: 30px; border-radius: 50%;
+  background: rgba(0,0,0,0.55); color: #fff; font-size: 0.95rem; padding: 0; border: none;
+  display: flex; align-items: center; justify-content: center;
+}
+
+/* lightbox */
+.lightbox {
+  position: fixed; inset: 0; background: rgba(0,0,0,0.94); z-index: 100;
+  display: flex; align-items: center; justify-content: center; padding: 24px;
+  opacity: 0; pointer-events: none; transition: opacity 0.15s;
+}
+.lightbox.show { opacity: 1; pointer-events: auto; }
+.lightbox img {
+  max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 10px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.6);
+}
+.lightbox-close {
+  position: absolute; top: 16px; right: 16px; width: 42px; height: 42px; border-radius: 50%;
+  background: rgba(255,255,255,0.15); color: #fff; font-size: 1.2rem; font-weight: 700;
+  display: flex; align-items: center; justify-content: center; padding: 0;
+}
