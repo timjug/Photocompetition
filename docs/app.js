@@ -340,10 +340,11 @@ async function renderHallOfFame() {
       return;
     }
     days.forEach((d) => {
-      if (!d.winners.length) return;
+      const actualWinners = d.winners.filter((w) => w.isWinner);
+      if (!actualWinners.length) return;
       const card = el(`<div class="card">
-        <div class="date-h">${prettyDate(d.contest_date)}${d.winners.length > 1 ? " · co-winners" : ""}</div>
-        ${d.winners
+        <div class="date-h">${prettyDate(d.contest_date)}${actualWinners.length > 1 ? " · co-winners" : ""}</div>
+        ${actualWinners
           .map(
             (w) => `<div class="winner">
               ${w.image_url ? `<img src="${w.image_url}" alt="">` : ""}
