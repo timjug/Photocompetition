@@ -275,15 +275,16 @@ async function handleHallOfFame(comp: string) {
 // All-time most wins across every competition (each winner row counts; co-wins count for each).
 async function handleLeaderboard() {
   const comps = await getCompetitions();
-  const { data: wins } = await db.from("winners").select("player_id, competition");
+  const { data: wins } = await db.from("winners").select("player_id, competition, is_cowinner");
   const { data: players } = await db.from("players").select("id, name");
   const nameById = new Map((players ?? []).map((p) => [p.id, p.name]));
   const agg = new Map<string, { wins: number; byComp: Record<string, number> }>();
   for (const w of wins ?? []) {
     if (!w.player_id) continue;
+    const pts = w.is_cowinner ? 0.5 : 1; // co-wins are worth half a point each
     const a = agg.get(w.player_id) ?? { wins: 0, byComp: {} };
-    a.wins += 1;
-    a.byComp[w.competition] = (a.byComp[w.competition] ?? 0) + 1;
+    a.wins += pts;
+    a.byComp[w.competition] = (a.byComp[w.competition] ?? 0) + pts;
     agg.set(w.player_id, a);
   }
   const rows = [...agg.entries()]

@@ -378,7 +378,10 @@ async function renderLeaderboard() {
       app.appendChild(el(`<div class="card center"><p class="sub">No wins recorded yet.</p></div>`));
       return;
     }
-    const card = el(`<div class="card"><div class="headline">🏅 All-time wins</div></div>`);
+    const card = el(`<div class="card">
+      <div class="headline">🏅 All-time wins</div>
+      <p class="sub">Outright win = 1 point · shared (co-)win = ½ point each.</p>
+    </div>`);
     leaderboard.forEach((r, i) => {
       const medal = i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : `${i + 1}.`;
       const parts = competitions
