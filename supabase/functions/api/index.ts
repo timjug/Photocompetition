@@ -331,13 +331,17 @@ async function handleVote(player: { id: string }, comp: string, body: any) {
 }
 
 async function handleHallOfFame(comp: string) {
+  const p = phaseInfo();
+  // The winners row for "today" is finalized by cron at 12:50, but isn't announced
+  // until 1:00pm — hide it from Hall of Fame until then.
+  const hideDate = p.minutes < RESULTS_AT ? p.today : null;
   const { data: wins } = await db
     .from("winners")
     .select("contest_date")
     .eq("competition", comp)
     .order("contest_date", { ascending: false })
     .limit(120);
-  const dates = [...new Set((wins ?? []).map((w) => w.contest_date))];
+  const dates = [...new Set((wins ?? []).map((w) => w.contest_date))].filter((d) => d !== hideDate);
   const days = await Promise.all(dates.map((d) => resultsFor(comp, d)));
   return json({ comp, days });
 }
@@ -345,12 +349,18 @@ async function handleHallOfFame(comp: string) {
 // All-time most wins across every competition (each winner row counts; co-wins count for each).
 async function handleLeaderboard() {
   const comps = await getCompetitions();
-  const { data: wins } = await db.from("winners").select("player_id, competition, is_cowinner");
+  const p = phaseInfo();
+  // Same 1:00pm embargo as Hall of Fame — don't count today's win until it's announced.
+  const hideDate = p.minutes < RESULTS_AT ? p.today : null;
+  const { data: wins } = await db
+    .from("winners")
+    .select("player_id, competition, is_cowinner, contest_date");
   const { data: players } = await db.from("players").select("id, name");
   const nameById = new Map((players ?? []).map((p) => [p.id, p.name]));
   const agg = new Map<string, { wins: number; byComp: Record<string, number> }>();
   for (const w of wins ?? []) {
     if (!w.player_id) continue;
+    if (hideDate && w.contest_date === hideDate) continue;
     const pts = w.is_cowinner ? 0.5 : 1; // co-wins are worth half a point each
     const a = agg.get(w.player_id) ?? { wins: 0, byComp: {} };
     a.wins += pts;
