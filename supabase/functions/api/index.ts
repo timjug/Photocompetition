@@ -21,9 +21,9 @@ const cors = {
 const db = createClient(SUPABASE_URL, SERVICE_KEY, { auth: { persistSession: false } });
 
 const SUBMIT_OPEN = 14 * 60;
-const SUBMIT_CLOSE = 11 * 60;
-const VOTE_OPEN = 11 * 60 + 5;
-const VOTE_CLOSE = 12 * 60 + 50;
+const SUBMIT_CLOSE = 11 * 60 + 30;
+const VOTE_OPEN = 11 * 60 + 30;
+const VOTE_CLOSE = 12 * 60 + 55;
 const RESULTS_AT = 13 * 60;
 
 function sastParts(now = new Date()) {
@@ -209,7 +209,7 @@ async function handleState(
     competitions: comps,
     comp,
     phase: p.primary,
-    times: { submit: "2:00pm", close: "11:00am", vote: "11:05am", winner: "1:00pm" },
+    times: { submit: "2:00pm", close: "11:30am", vote: "11:30am", winner: "1:00pm" },
   };
 
   if (p.primary === "submit" && p.submitDate) {
@@ -332,7 +332,7 @@ async function handleVote(player: { id: string }, comp: string, body: any) {
 
 async function handleHallOfFame(comp: string) {
   const p = phaseInfo();
-  // The winners row for "today" is finalized by cron at 12:50, but isn't announced
+  // The winners row for "today" is finalized by cron at 12:55, but isn't announced
   // until 1:00pm — hide it from Hall of Fame until then.
   const hideDate = p.minutes < RESULTS_AT ? p.today : null;
   const { data: wins } = await db

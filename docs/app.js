@@ -171,9 +171,9 @@ function renderSubmit(s) {
   app.innerHTML = "";
   const has = s.yourSubmission;
   const card = el(`<div class="card">
-    <div class="banner submit">📸 Submissions are open — until 11:00am</div>
+    <div class="banner submit">📸 Submissions are open — until 11:30am</div>
     <div class="headline">${has ? "Your photo is in!" : "Submit your photo"}</div>
-    <p class="sub">${has ? "You can replace it any time before 11:00am." : "One photo per person. You can change it until 11:00am."}</p>
+    <p class="sub">${has ? "You can replace it any time before 11:30am." : "One photo per person. You can change it until 11:30am."}</p>
     ${has && has.image_url ? `<img class="preview" src="${has.image_url}" alt="your photo">` : `<div id="prevWrap"></div>`}
     <label class="label-btn" for="file">${has ? "📷 Choose a different photo" : "📷 Choose a photo"}</label>
     <input type="file" id="file" accept="image/*">
@@ -234,7 +234,7 @@ function renderVote(s) {
   if (s.votableCount === 0) {
     app.appendChild(
       el(`<div class="card center">
-        <div class="banner vote">🗳️ Voting is open — until 12:50pm</div>
+        <div class="banner vote">🗳️ Voting is open — until 12:55pm</div>
         <p class="sub">There are no other photos to vote for today.</p>
       </div>`),
     );
@@ -247,7 +247,7 @@ function renderVote(s) {
     return;
   }
   const card = el(`<div class="card">
-    <div class="banner vote">🗳️ Voting is open — until 12:50pm</div>
+    <div class="banner vote">🗳️ Voting is open — until 12:55pm</div>
     <div class="headline">Pick the best</div>
     <p class="sub" id="votestatus"></p>
     <div class="grid"></div>
@@ -284,8 +284,8 @@ function renderVote(s) {
       tag.style.display = sel || own || t.dataset.caption ? "block" : "none";
     });
     status.textContent = selected
-      ? "✓ You voted for the highlighted photo. Tap another to change it (until 12:50pm)."
-      : "Anonymous — tap a photo to vote. You can change it until 12:50pm. Winner at 1:00pm.";
+      ? "✓ You voted for the highlighted photo. Tap another to change it (until 12:55pm)."
+      : "Anonymous — tap a photo to vote. You can change it until 12:55pm. Winner at 1:00pm.";
   }
 
   ballot.forEach((b) => {
