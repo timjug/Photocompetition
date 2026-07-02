@@ -2,7 +2,8 @@
 -- Timezone for all scheduling is Africa/Johannesburg (SAST, UTC+2, no DST).
 -- A contest is keyed by its VOTING DAY (the 11:30am day) = `contest_date`:
 --   submit:  (contest_date - 1) 14:00  ->  contest_date 11:30
---   voting:  contest_date 11:30         ->  contest_date 12:55
+--   tally:   contest_date 11:30         ->  contest_date 11:35
+--   voting:  contest_date 11:35         ->  contest_date 12:55
 --   tally:   contest_date 12:55         ->  contest_date 13:00
 --   results: contest_date 13:00         ->  onward
 -- All client reads/writes go through the `api` edge function (service role).

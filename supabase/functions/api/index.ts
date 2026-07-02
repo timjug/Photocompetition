@@ -22,7 +22,7 @@ const db = createClient(SUPABASE_URL, SERVICE_KEY, { auth: { persistSession: fal
 
 const SUBMIT_OPEN = 14 * 60;
 const SUBMIT_CLOSE = 11 * 60 + 30;
-const VOTE_OPEN = 11 * 60 + 30;
+const VOTE_OPEN = 11 * 60 + 35;
 const VOTE_CLOSE = 12 * 60 + 55;
 const RESULTS_AT = 13 * 60;
 
@@ -209,7 +209,7 @@ async function handleState(
     competitions: comps,
     comp,
     phase: p.primary,
-    times: { submit: "2:00pm", close: "11:30am", vote: "11:30am", winner: "1:00pm" },
+    times: { submit: "2:00pm", close: "11:30am", vote: "11:35am", winner: "1:00pm" },
   };
 
   if (p.primary === "submit" && p.submitDate) {
