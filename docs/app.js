@@ -4,22 +4,41 @@ const API = `${CONFIG.SUPABASE_URL}/functions/v1/api`;
 const app = document.getElementById("app");
 const whoEl = document.getElementById("who");
 
-// --- token: from ?t= (persist) or localStorage -----------------------------
+// --- storage: falls back to an in-memory object if localStorage is blocked --
+// (e.g. Safari Private Browsing on iPad) so the app still works for the
+// current page load instead of crashing on the very first line of script.
+const memoryStore = {};
+function storeGet(key) {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return memoryStore[key] ?? null;
+  }
+}
+function storeSet(key, value) {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    memoryStore[key] = value;
+  }
+}
+
+// --- token: from ?t= (persist) or storage ------------------------------------
 function getToken() {
   const u = new URL(location.href);
   const t = u.searchParams.get("t");
   if (t) {
-    localStorage.setItem("bpotd_token", t);
+    storeSet("bpotd_token", t);
     u.searchParams.delete("t");
     history.replaceState({}, "", u.pathname + u.search + u.hash); // hide token from address bar
     return t;
   }
-  return localStorage.getItem("bpotd_token");
+  return storeGet("bpotd_token");
 }
 const TOKEN = getToken();
 
 // --- competition state ------------------------------------------------------
-let COMP = localStorage.getItem("bpotd_comp") || "photo";
+let COMP = storeGet("bpotd_comp") || "photo";
 let COMPETITIONS = [];
 let CURRENT_TAB = "home";
 
@@ -408,7 +427,7 @@ function renderSwitch() {
     b.addEventListener("click", () => {
       if (c.slug === COMP) return;
       COMP = c.slug;
-      localStorage.setItem("bpotd_comp", COMP);
+      storeSet("bpotd_comp", COMP);
       updateHeader();
       renderSwitch();
       if (CURRENT_TAB === "hof") renderHallOfFame();
@@ -434,7 +453,7 @@ async function load() {
     if (s.competitions) COMPETITIONS = s.competitions;
     if (s.comp) {
       COMP = s.comp;
-      localStorage.setItem("bpotd_comp", COMP);
+      storeSet("bpotd_comp", COMP);
     }
     const adminTab = document.getElementById("adminTab");
     if (adminTab) adminTab.hidden = !(s.you && s.you.is_admin);
