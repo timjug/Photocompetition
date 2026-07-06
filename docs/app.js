@@ -378,6 +378,20 @@ function renderResults(s) {
   );
 }
 
+// Shared Part One / Part Two switcher for Hall of Fame and Leaderboard.
+function buildSeasonSwitch(seasons, current, onPick) {
+  const sw = el(`<div class="seasonswitch"></div>`);
+  seasons.forEach((se) => {
+    const b = el(`<button class="${se.id === current ? "active" : ""}">${esc(se.label)}</button>`);
+    b.addEventListener("click", () => {
+      if (se.id === current) return;
+      onPick(se.id);
+    });
+    sw.appendChild(b);
+  });
+  return sw;
+}
+
 async function renderHallOfFame() {
   updateHeader();
   renderSwitch();
@@ -390,18 +404,13 @@ async function renderHallOfFame() {
     }
     app.innerHTML = "";
     if (seasons && seasons.length > 1) {
-      const sw = el(`<div class="seasonswitch"></div>`);
-      seasons.forEach((se) => {
-        const b = el(`<button class="${se.id === SEASON ? "active" : ""}">${esc(se.label)}</button>`);
-        b.addEventListener("click", () => {
-          if (se.id === SEASON) return;
-          SEASON = se.id;
-          storeSet("bpotd_season", String(se.id));
+      app.appendChild(
+        buildSeasonSwitch(seasons, SEASON, (id) => {
+          SEASON = id;
+          storeSet("bpotd_season", String(id));
           renderHallOfFame();
-        });
-        sw.appendChild(b);
-      });
-      app.appendChild(sw);
+        }),
+      );
     }
     if (!days || days.length === 0) {
       app.appendChild(el(`<div class="card center"><p class="sub">No winners recorded yet.</p></div>`));
@@ -498,14 +507,27 @@ async function renderLeaderboard() {
   renderSwitch();
   app.innerHTML = `<div class="card loading">Loading…</div>`;
   try {
-    const { leaderboard, competitions } = await api("leaderboard");
+    const { leaderboard, competitions, seasons, season } = await api("leaderboard", { season: SEASON });
+    if (season != null) {
+      SEASON = season;
+      storeSet("bpotd_season", String(season));
+    }
     app.innerHTML = "";
+    if (seasons && seasons.length > 1) {
+      app.appendChild(
+        buildSeasonSwitch(seasons, SEASON, (id) => {
+          SEASON = id;
+          storeSet("bpotd_season", String(id));
+          renderLeaderboard();
+        }),
+      );
+    }
     if (!leaderboard || leaderboard.length === 0) {
       app.appendChild(el(`<div class="card center"><p class="sub">No wins recorded yet.</p></div>`));
       return;
     }
     const card = el(`<div class="card">
-      <div class="headline">🏅 All-time wins</div>
+      <div class="headline">🏅 Wins</div>
       <p class="sub">Outright win = 1 point · shared (co-)win = ½ point each. 🗳️ = total votes ever received.</p>
     </div>`);
     leaderboard.forEach((r, i) => {

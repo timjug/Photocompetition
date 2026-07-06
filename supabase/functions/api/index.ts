@@ -390,13 +390,20 @@ async function handleAllPhotos(comp: string) {
   return json({ comp, days });
 }
 
-// All-time most wins across every competition (each winner row counts; co-wins count for each).
-// Also tallies total votes ever received per person (wins and non-wins), as a popularity stat.
-async function handleLeaderboard() {
+// Most wins within a Hall of Fame season (each winner row counts; co-wins count for each).
+// Also tallies total votes received per person within that season (wins and non-wins),
+// as a popularity stat.
+async function handleLeaderboard(body: any) {
   const comps = await getCompetitions();
   const p = phaseInfo();
   // Same 1:00pm embargo as Hall of Fame — don't count today's result until it's announced.
   const hideDate = p.minutes < RESULTS_AT ? p.today : null;
+
+  const seasons = await getSeasons();
+  const seasonId = resolveSeason(body.season, seasons, p.today);
+  const season = seasons.find((s) => s.id === seasonId) ?? null;
+  const inSeason = (d: string) => !season || (d >= season.starts_on && (!season.ends_on || d <= season.ends_on));
+
   const { data: wins } = await db
     .from("winners")
     .select("player_id, competition, is_cowinner, contest_date");
@@ -421,6 +428,7 @@ async function handleLeaderboard() {
   for (const w of wins ?? []) {
     if (!w.player_id) continue;
     if (hideDate && w.contest_date === hideDate) continue;
+    if (!inSeason(w.contest_date)) continue;
     const pts = w.is_cowinner ? 0.5 : 1; // co-wins are worth half a point each
     const a = ensure(w.player_id);
     a.wins += pts;
@@ -429,6 +437,7 @@ async function handleLeaderboard() {
 
   for (const v of allVotes ?? []) {
     if (hideDate && v.contest_date === hideDate) continue;
+    if (!inSeason(v.contest_date)) continue;
     const ownerId = ownerBySubmission.get(v.submission_id);
     if (!ownerId) continue;
     const a = ensure(ownerId);
@@ -445,7 +454,7 @@ async function handleLeaderboard() {
       votesByComp: a.votesByComp,
     }))
     .sort((x, y) => y.wins - x.wins || y.totalVotes - x.totalVotes || x.name.localeCompare(y.name));
-  return json({ leaderboard: rows, competitions: comps });
+  return json({ leaderboard: rows, competitions: comps, seasons, season: seasonId });
 }
 
 // ----- Admin (caller is verified is_admin before these run) -----------------
@@ -537,7 +546,7 @@ Deno.serve(async (req) => {
 
   // Public (no token) actions.
   if (body.action === "hall_of_fame") return handleHallOfFame(comp, body);
-  if (body.action === "leaderboard") return handleLeaderboard();
+  if (body.action === "leaderboard") return handleLeaderboard(body);
 
   const player = await playerFromToken(body.token);
   if (!player) return json({ error: "Unknown or inactive link." }, 401);
