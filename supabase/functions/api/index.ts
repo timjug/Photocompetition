@@ -89,6 +89,28 @@ async function resolveComp(raw: unknown, comps: { slug: string }[]) {
   return comps[0]?.slug ?? "photo";
 }
 
+async function getSeasons() {
+  const { data } = await db
+    .from("hof_seasons")
+    .select("id, label, starts_on, ends_on")
+    .order("sort", { ascending: true });
+  return data ?? [];
+}
+
+// Pick the requested season if valid, else whichever season's date range covers
+// "today", else the last (most recent) season.
+function resolveSeason(
+  raw: unknown,
+  seasons: { id: number; starts_on: string; ends_on: string | null }[],
+  today: string,
+): number | null {
+  const wantId = typeof raw === "number" ? raw : typeof raw === "string" && raw !== "" ? Number(raw) : NaN;
+  if (!Number.isNaN(wantId) && seasons.some((s) => s.id === wantId)) return wantId;
+  const current = seasons.find((s) => s.starts_on <= today && (!s.ends_on || today <= s.ends_on));
+  if (current) return current.id;
+  return seasons.length ? seasons[seasons.length - 1].id : null;
+}
+
 async function playerFromToken(token: string) {
   if (!token) return null;
   const { data } = await db
@@ -330,46 +352,99 @@ async function handleVote(player: { id: string }, comp: string, body: any) {
   return json({ ok: true, yourVote: submission_id });
 }
 
-async function handleHallOfFame(comp: string) {
+async function handleHallOfFame(comp: string, body: any) {
   const p = phaseInfo();
   // The winners row for "today" is finalized by cron at 12:55, but isn't announced
   // until 1:00pm — hide it from Hall of Fame until then.
   const hideDate = p.minutes < RESULTS_AT ? p.today : null;
+
+  const seasons = await getSeasons();
+  const seasonId = resolveSeason(body.season, seasons, p.today);
+  const season = seasons.find((s) => s.id === seasonId) ?? null;
+
   const { data: wins } = await db
     .from("winners")
     .select("contest_date")
     .eq("competition", comp)
     .order("contest_date", { ascending: false })
-    .limit(120);
-  const dates = [...new Set((wins ?? []).map((w) => w.contest_date))].filter((d) => d !== hideDate);
+    .limit(400);
+  let dates = [...new Set((wins ?? []).map((w) => w.contest_date))].filter((d) => d !== hideDate);
+  if (season) {
+    dates = dates.filter((d) => d >= season.starts_on && (!season.ends_on || d <= season.ends_on));
+  }
+  const days = await Promise.all(dates.map((d) => resultsFor(comp, d)));
+  return json({ comp, seasons, season: seasonId, days });
+}
+
+// Every submitted photo (winners and non-winners), for a permanent archive.
+async function handleAllPhotos(comp: string) {
+  const p = phaseInfo();
+  const hideDate = p.minutes < RESULTS_AT ? p.today : null;
+  const { data: subs } = await db
+    .from("submissions")
+    .select("contest_date")
+    .eq("competition", comp)
+    .order("contest_date", { ascending: false });
+  const dates = [...new Set((subs ?? []).map((s) => s.contest_date))].filter((d) => d !== hideDate);
   const days = await Promise.all(dates.map((d) => resultsFor(comp, d)));
   return json({ comp, days });
 }
 
 // All-time most wins across every competition (each winner row counts; co-wins count for each).
+// Also tallies total votes ever received per person (wins and non-wins), as a popularity stat.
 async function handleLeaderboard() {
   const comps = await getCompetitions();
   const p = phaseInfo();
-  // Same 1:00pm embargo as Hall of Fame — don't count today's win until it's announced.
+  // Same 1:00pm embargo as Hall of Fame — don't count today's result until it's announced.
   const hideDate = p.minutes < RESULTS_AT ? p.today : null;
   const { data: wins } = await db
     .from("winners")
     .select("player_id, competition, is_cowinner, contest_date");
+  const { data: allVotes } = await db.from("votes").select("submission_id, competition, contest_date");
+  const { data: allSubs } = await db.from("submissions").select("id, player_id");
   const { data: players } = await db.from("players").select("id, name");
+
   const nameById = new Map((players ?? []).map((p) => [p.id, p.name]));
-  const agg = new Map<string, { wins: number; byComp: Record<string, number> }>();
+  const ownerBySubmission = new Map((allSubs ?? []).map((s) => [s.id, s.player_id]));
+
+  type Row = { wins: number; byComp: Record<string, number>; totalVotes: number; votesByComp: Record<string, number> };
+  const agg = new Map<string, Row>();
+  function ensure(id: string): Row {
+    let a = agg.get(id);
+    if (!a) {
+      a = { wins: 0, byComp: {}, totalVotes: 0, votesByComp: {} };
+      agg.set(id, a);
+    }
+    return a;
+  }
+
   for (const w of wins ?? []) {
     if (!w.player_id) continue;
     if (hideDate && w.contest_date === hideDate) continue;
     const pts = w.is_cowinner ? 0.5 : 1; // co-wins are worth half a point each
-    const a = agg.get(w.player_id) ?? { wins: 0, byComp: {} };
+    const a = ensure(w.player_id);
     a.wins += pts;
     a.byComp[w.competition] = (a.byComp[w.competition] ?? 0) + pts;
-    agg.set(w.player_id, a);
   }
+
+  for (const v of allVotes ?? []) {
+    if (hideDate && v.contest_date === hideDate) continue;
+    const ownerId = ownerBySubmission.get(v.submission_id);
+    if (!ownerId) continue;
+    const a = ensure(ownerId);
+    a.totalVotes += 1;
+    a.votesByComp[v.competition] = (a.votesByComp[v.competition] ?? 0) + 1;
+  }
+
   const rows = [...agg.entries()]
-    .map(([id, a]) => ({ name: nameById.get(id) ?? "Unknown", wins: a.wins, byComp: a.byComp }))
-    .sort((x, y) => y.wins - x.wins || x.name.localeCompare(y.name));
+    .map(([id, a]) => ({
+      name: nameById.get(id) ?? "Unknown",
+      wins: a.wins,
+      byComp: a.byComp,
+      totalVotes: a.totalVotes,
+      votesByComp: a.votesByComp,
+    }))
+    .sort((x, y) => y.wins - x.wins || y.totalVotes - x.totalVotes || x.name.localeCompare(y.name));
   return json({ leaderboard: rows, competitions: comps });
 }
 
@@ -461,7 +536,7 @@ Deno.serve(async (req) => {
   const comp = await resolveComp(body.comp, comps);
 
   // Public (no token) actions.
-  if (body.action === "hall_of_fame") return handleHallOfFame(comp);
+  if (body.action === "hall_of_fame") return handleHallOfFame(comp, body);
   if (body.action === "leaderboard") return handleLeaderboard();
 
   const player = await playerFromToken(body.token);
@@ -491,6 +566,8 @@ Deno.serve(async (req) => {
       return handleSubmit(player, comp, body);
     case "vote":
       return handleVote(player, comp, body);
+    case "all_photos":
+      return handleAllPhotos(comp);
     default:
       return json({ error: "Unknown action" }, 400);
   }

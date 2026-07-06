@@ -41,6 +41,9 @@ const TOKEN = getToken();
 let COMP = storeGet("bpotd_comp") || "photo";
 let COMPETITIONS = [];
 let CURRENT_TAB = "home";
+// Hall of Fame "season" (e.g. Part One / Part Two) — null lets the server pick the current one.
+const storedSeason = storeGet("bpotd_season");
+let SEASON = storedSeason ? Number(storedSeason) : null;
 
 // --- api --------------------------------------------------------------------
 async function api(action, extra = {}) {
@@ -380,8 +383,26 @@ async function renderHallOfFame() {
   renderSwitch();
   app.innerHTML = `<div class="card loading">Loading…</div>`;
   try {
-    const { days } = await api("hall_of_fame");
+    const { days, seasons, season } = await api("hall_of_fame", { season: SEASON });
+    if (season != null) {
+      SEASON = season;
+      storeSet("bpotd_season", String(season));
+    }
     app.innerHTML = "";
+    if (seasons && seasons.length > 1) {
+      const sw = el(`<div class="seasonswitch"></div>`);
+      seasons.forEach((se) => {
+        const b = el(`<button class="${se.id === SEASON ? "active" : ""}">${esc(se.label)}</button>`);
+        b.addEventListener("click", () => {
+          if (se.id === SEASON) return;
+          SEASON = se.id;
+          storeSet("bpotd_season", String(se.id));
+          renderHallOfFame();
+        });
+        sw.appendChild(b);
+      });
+      app.appendChild(sw);
+    }
     if (!days || days.length === 0) {
       app.appendChild(el(`<div class="card center"><p class="sub">No winners recorded yet.</p></div>`));
       return;
@@ -431,6 +452,7 @@ function renderSwitch() {
       updateHeader();
       renderSwitch();
       if (CURRENT_TAB === "hof") renderHallOfFame();
+      else if (CURRENT_TAB === "gallery") renderGallery();
       else load();
     });
     host.appendChild(b);
@@ -484,7 +506,7 @@ async function renderLeaderboard() {
     }
     const card = el(`<div class="card">
       <div class="headline">🏅 All-time wins</div>
-      <p class="sub">Outright win = 1 point · shared (co-)win = ½ point each.</p>
+      <p class="sub">Outright win = 1 point · shared (co-)win = ½ point each. 🗳️ = total votes ever received.</p>
     </div>`);
     leaderboard.forEach((r, i) => {
       const medal = i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : `${i + 1}.`;
@@ -492,16 +514,63 @@ async function renderLeaderboard() {
         .map((c) => (r.byComp[c.slug] ? `${c.emoji} ${fmtPoints(r.byComp[c.slug])}` : null))
         .filter(Boolean)
         .join("  ");
+      const votes = r.totalVotes || 0;
       card.appendChild(
         el(`<div class="lb-row">
           <span class="lb-rank">${medal}</span>
-          <span class="lb-name">${esc(r.name)}</span>
+          <span class="lb-namewrap">
+            <span class="lb-name">${esc(r.name)}</span>
+            <span class="lb-votes">🗳️ ${votes} vote${votes === 1 ? "" : "s"}</span>
+          </span>
           <span class="lb-sub">${parts}</span>
           <span class="lb-wins">${fmtPoints(r.wins)}</span>
         </div>`),
       );
     });
     app.appendChild(card);
+  } catch (e) {
+    app.innerHTML = `<div class="card center"><p class="sub">${esc(e.message)}</p></div>`;
+  }
+}
+
+// --- gallery: every submitted photo, winners and non-winners, for keepsakes -
+async function renderGallery() {
+  if (!TOKEN) {
+    app.innerHTML = `<div class="card center">
+      <div class="headline">Welcome 👋</div>
+      <p class="sub">Open your personal link to join. Ask the organiser for yours if you don't have it.</p>
+    </div>`;
+    return;
+  }
+  updateHeader();
+  renderSwitch();
+  app.innerHTML = `<div class="card loading">Loading…</div>`;
+  try {
+    const { days } = await api("all_photos");
+    app.innerHTML = "";
+    if (!days || days.length === 0) {
+      app.appendChild(el(`<div class="card center"><p class="sub">No photos yet.</p></div>`));
+      return;
+    }
+    days.forEach((d) => {
+      if (!d.winners.length) return;
+      const card = el(`<div class="card">
+        <div class="date-h">${prettyDate(d.contest_date)}</div>
+        ${d.winners
+          .map(
+            (w) => `<div class="result-row">
+              ${w.image_url ? `<img src="${w.image_url}" alt="">` : ""}
+              <div class="result-meta">
+                <div class="result-name">${w.isWinner ? "👑 " : ""}${esc(w.name)}</div>
+                ${w.caption ? `<div class="result-caption">${esc(w.caption)}</div>` : ""}
+              </div>
+              <div class="result-votes">${w.votes}</div>
+            </div>`,
+          )
+          .join("")}
+      </div>`);
+      app.appendChild(card);
+    });
   } catch (e) {
     app.innerHTML = `<div class="card center"><p class="sub">${esc(e.message)}</p></div>`;
   }
@@ -612,6 +681,7 @@ document.querySelector(".tabs").addEventListener("click", (e) => {
   CURRENT_TAB = btn.dataset.tab;
   if (CURRENT_TAB === "hof") renderHallOfFame();
   else if (CURRENT_TAB === "board") renderLeaderboard();
+  else if (CURRENT_TAB === "gallery") renderGallery();
   else if (CURRENT_TAB === "admin") renderAdmin();
   else load();
 });
