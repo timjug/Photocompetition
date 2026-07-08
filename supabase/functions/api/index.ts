@@ -20,11 +20,11 @@ const cors = {
 
 const db = createClient(SUPABASE_URL, SERVICE_KEY, { auth: { persistSession: false } });
 
-const SUBMIT_OPEN = 14 * 60;
-const SUBMIT_CLOSE = 11 * 60 + 30;
-const VOTE_OPEN = 11 * 60 + 35;
-const VOTE_CLOSE = 12 * 60 + 55;
-const RESULTS_AT = 13 * 60;
+const SUBMIT_OPEN = 15 * 60;
+const SUBMIT_CLOSE = 12 * 60 + 30;
+const VOTE_OPEN = 12 * 60 + 35;
+const VOTE_CLOSE = 13 * 60 + 55;
+const RESULTS_AT = 14 * 60;
 
 function sastParts(now = new Date()) {
   const s = new Date(now.getTime() + 2 * 60 * 60 * 1000);
@@ -231,7 +231,7 @@ async function handleState(
     competitions: comps,
     comp,
     phase: p.primary,
-    times: { submit: "2:00pm", close: "11:30am", vote: "11:35am", winner: "1:00pm" },
+    times: { submit: "3:00pm", close: "12:30pm", vote: "12:35pm", winner: "2:00pm" },
   };
 
   if (p.primary === "submit" && p.submitDate) {
@@ -354,8 +354,8 @@ async function handleVote(player: { id: string }, comp: string, body: any) {
 
 async function handleHallOfFame(comp: string, body: any) {
   const p = phaseInfo();
-  // The winners row for "today" is finalized by cron at 12:55, but isn't announced
-  // until 1:00pm — hide it from Hall of Fame until then.
+  // The winners row for "today" is finalized by cron at 13:55, but isn't announced
+  // until 2:00pm — hide it from Hall of Fame until then.
   const hideDate = p.minutes < RESULTS_AT ? p.today : null;
 
   const seasons = await getSeasons();
@@ -396,7 +396,7 @@ async function handleAllPhotos(comp: string) {
 async function handleLeaderboard(body: any) {
   const comps = await getCompetitions();
   const p = phaseInfo();
-  // Same 1:00pm embargo as Hall of Fame — don't count today's result until it's announced.
+  // Same 2:00pm embargo as Hall of Fame — don't count today's result until it's announced.
   const hideDate = p.minutes < RESULTS_AT ? p.today : null;
 
   const seasons = await getSeasons();
@@ -564,7 +564,7 @@ Deno.serve(async (req) => {
       case "admin_set_active":
         return handleAdminSetActive(player, body);
       default:
-        return json({ error: "Unknown admin action" }, 400);
+        return json({ error: "Unknown action" }, 400);
     }
   }
 
