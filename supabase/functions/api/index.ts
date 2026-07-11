@@ -20,14 +20,21 @@ const cors = {
 
 const db = createClient(SUPABASE_URL, SERVICE_KEY, { auth: { persistSession: false } });
 
-// Submit/vote/results all fall on the same calendar day now (submission no
-// longer spans overnight): open 5:00am, close 6:00pm, vote 6:05-6:55pm,
-// winner announced 7:00pm.
-const SUBMIT_OPEN = 5 * 60;
-const SUBMIT_CLOSE = 18 * 60;
-const VOTE_OPEN = 18 * 60 + 5;
-const VOTE_CLOSE = 18 * 60 + 55;
-const RESULTS_AT = 19 * 60;
+// Back to the overnight-spanning schedule: submissions open 2:00pm and carry
+// over into the next morning, closing 11:30am; voting 11:35am-12:55pm;
+// winner announced 1:00pm.
+const SUBMIT_OPEN = 14 * 60;
+const SUBMIT_CLOSE = 11 * 60 + 30;
+const VOTE_OPEN = 11 * 60 + 35;
+const VOTE_CLOSE = 12 * 60 + 55;
+const RESULTS_AT = 13 * 60;
+
+// One-time migration day: we're switching back to this schedule mid-morning,
+// so today's round (which had already opened under the previous same-day
+// schedule) extends straight through to tomorrow's cutoff instead of closing
+// this morning per the schedule above. Harmless after this date passes —
+// the check simply stops matching and can be deleted later.
+const TRANSITION_DATE = "2026-07-11";
 
 function sastParts(now = new Date()) {
   const s = new Date(now.getTime() + 2 * 60 * 60 * 1000);
@@ -48,12 +55,21 @@ function addDays(dateStr: string, delta: number): string {
 
 function phaseInfo(now = new Date()) {
   const { dateStr: today, minutes } = sastParts(now);
-  const submitDate = minutes >= SUBMIT_OPEN && minutes < SUBMIT_CLOSE ? today : null;
-  const voteDate = minutes >= VOTE_OPEN && minutes < VOTE_CLOSE ? today : null;
+  const extending = today === TRANSITION_DATE && minutes < SUBMIT_OPEN;
+
+  let submitDate: string | null = null;
+  if (extending || minutes >= SUBMIT_OPEN) submitDate = addDays(today, 1);
+  else if (minutes < SUBMIT_CLOSE) submitDate = today;
+
+  const voteDate = !extending && minutes >= VOTE_OPEN && minutes < VOTE_CLOSE ? today : null;
   const tallying =
-    (minutes >= SUBMIT_CLOSE && minutes < VOTE_OPEN) ||
-    (minutes >= VOTE_CLOSE && minutes < RESULTS_AT);
-  const resultsDate = minutes >= RESULTS_AT ? today : addDays(today, -1);
+    !extending &&
+    ((minutes >= SUBMIT_CLOSE && minutes < VOTE_OPEN) ||
+      (minutes >= VOTE_CLOSE && minutes < RESULTS_AT));
+
+  let resultsDate = minutes >= RESULTS_AT ? today : addDays(today, -1);
+  if (resultsDate === TRANSITION_DATE) resultsDate = addDays(TRANSITION_DATE, -1); // that date was merged into the next day's round
+
   let primary: "vote" | "submit" | "tallying" | "results";
   if (voteDate) primary = "vote";
   else if (submitDate) primary = "submit";
@@ -232,7 +248,7 @@ async function handleState(
     competitions: comps,
     comp,
     phase: p.primary,
-    times: { submit: "5:00am", close: "6:00pm", vote: "6:05pm", winner: "7:00pm" },
+    times: { submit: "2:00pm", close: "11:30am", vote: "11:35am", winner: "1:00pm" },
   };
 
   if (p.primary === "submit" && p.submitDate) {
@@ -355,8 +371,8 @@ async function handleVote(player: { id: string }, comp: string, body: any) {
 
 async function handleHallOfFame(comp: string, body: any) {
   const p = phaseInfo();
-  // The winners row for "today" is finalized by cron at 18:55, but isn't announced
-  // until 7:00pm — hide it from Hall of Fame until then.
+  // The winners row for "today" is finalized by cron at 12:55, but isn't announced
+  // until 1:00pm — hide it from Hall of Fame until then.
   const hideDate = p.minutes < RESULTS_AT ? p.today : null;
 
   const seasons = await getSeasons();
@@ -397,7 +413,7 @@ async function handleAllPhotos(comp: string) {
 async function handleLeaderboard(body: any) {
   const comps = await getCompetitions();
   const p = phaseInfo();
-  // Same 7:00pm embargo as Hall of Fame — don't count today's result until it's announced.
+  // Same 1:00pm embargo as Hall of Fame — don't count today's result until it's announced.
   const hideDate = p.minutes < RESULTS_AT ? p.today : null;
 
   const seasons = await getSeasons();

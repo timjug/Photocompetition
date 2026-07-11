@@ -1,12 +1,11 @@
 -- Best Photo of the Day — schema
 -- Timezone for all scheduling is Africa/Johannesburg (SAST, UTC+2, no DST).
--- A contest runs entirely within one calendar day = `contest_date` (no more
--- overnight submission window):
---   submit:  contest_date 05:00         ->  contest_date 18:00
---   tally:   contest_date 18:00         ->  contest_date 18:05
---   voting:  contest_date 18:05         ->  contest_date 18:55
---   tally:   contest_date 18:55         ->  contest_date 19:00
---   results: contest_date 19:00         ->  onward (until 05:00 the next day)
+-- A contest is keyed by its VOTING DAY (the 1pm day) = `contest_date`:
+--   submit:  (contest_date - 1) 14:00  ->  contest_date 11:30
+--   tally:   contest_date 11:30         ->  contest_date 11:35
+--   voting:  contest_date 11:35         ->  contest_date 12:55
+--   tally:   contest_date 12:55         ->  contest_date 13:00
+--   results: contest_date 13:00         ->  onward
 -- All client reads/writes go through the `api` edge function (service role).
 -- RLS is enabled with NO public policies => anon/auth roles get nothing.
 
