@@ -20,20 +20,20 @@ const cors = {
 
 const db = createClient(SUPABASE_URL, SERVICE_KEY, { auth: { persistSession: false } });
 
-// Back to the overnight-spanning schedule: submissions open 2:00pm and carry
-// over into the next morning, closing 11:30am; voting 11:35am-12:55pm;
-// winner announced 1:00pm.
-const SUBMIT_OPEN = 14 * 60;
-const SUBMIT_CLOSE = 11 * 60 + 30;
-const VOTE_OPEN = 11 * 60 + 35;
-const VOTE_CLOSE = 12 * 60 + 55;
-const RESULTS_AT = 13 * 60;
+// More time to upload on weak wifi: submissions open 3:30pm and carry over
+// into the next day, closing 1:00pm; voting 1:05-2:25pm; winner announced
+// 2:30pm.
+const SUBMIT_OPEN = 15 * 60 + 30;
+const SUBMIT_CLOSE = 13 * 60;
+const VOTE_OPEN = 13 * 60 + 5;
+const VOTE_CLOSE = 14 * 60 + 25;
+const RESULTS_AT = 14 * 60 + 30;
 
-// One-time migration day: we're switching back to this schedule mid-morning,
-// so today's round (which had already opened under the previous same-day
-// schedule) extends straight through to tomorrow's cutoff instead of closing
-// this morning per the schedule above. Harmless after this date passes —
-// the check simply stops matching and can be deleted later.
+// One-time migration day: we changed the schedule mid-afternoon, so today's
+// round (already open since the old 2:00pm) extends straight through to
+// tomorrow's cutoff instead of closing per the schedule above. Harmless
+// after this date passes — the check simply stops matching and can be
+// deleted later.
 const TRANSITION_DATE = "2026-07-11";
 
 function sastParts(now = new Date()) {
@@ -160,14 +160,14 @@ async function resultsFor(comp: string, contest_date: string) {
   // Get all submissions
   const { data: subs } = await db
     .from("submissions")
-    .select("id, player_id, photo_path, caption")
+    .select("id, player_id, photo_path, thumb_path, caption")
     .eq("competition", comp)
     .eq("contest_date", contest_date);
 
   // Get all winners (including manually-added hall of fame entries)
   const { data: allWinners } = await db
     .from("winners")
-    .select("player_id, photo_path, caption, vote_count")
+    .select("player_id, photo_path, thumb_path, caption, vote_count")
     .eq("competition", comp)
     .eq("contest_date", contest_date);
 
@@ -203,6 +203,7 @@ async function resultsFor(comp: string, contest_date: string) {
         votes: voteCountMap.get(s.id) ?? 0,
         isWinner: winnerPlayerIds.has(s.player_id),
         image_url: await signed(s.photo_path),
+        thumb_url: s.thumb_path ? await signed(s.thumb_path) : null,
       };
     }),
   );
@@ -221,6 +222,7 @@ async function resultsFor(comp: string, contest_date: string) {
           votes: w.vote_count,
           isWinner: true,
           image_url: await signed(w.photo_path),
+          thumb_url: w.thumb_path ? await signed(w.thumb_path) : null,
         };
       }),
   );
@@ -248,14 +250,14 @@ async function handleState(
     competitions: comps,
     comp,
     phase: p.primary,
-    times: { submit: "2:00pm", close: "11:30am", vote: "11:35am", winner: "1:00pm" },
+    times: { submit: "3:30pm", close: "1:00pm", vote: "1:05pm", winner: "2:30pm" },
   };
 
   if (p.primary === "submit" && p.submitDate) {
     out.contest_date = p.submitDate;
     const { data: mine } = await db
       .from("submissions")
-      .select("caption, photo_path, updated_at")
+      .select("caption, photo_path, thumb_path, updated_at")
       .eq("competition", comp)
       .eq("contest_date", p.submitDate)
       .eq("player_id", player.id)
@@ -265,6 +267,7 @@ async function handleState(
         caption: mine.caption,
         updated_at: mine.updated_at,
         image_url: await signed(mine.photo_path),
+        thumb_url: mine.thumb_path ? await signed(mine.thumb_path) : null,
       };
     }
     const { count } = await db
@@ -279,7 +282,7 @@ async function handleState(
     out.contest_date = p.voteDate;
     const { data: subs } = await db
       .from("submissions")
-      .select("id, caption, photo_path, player_id")
+      .select("id, caption, photo_path, thumb_path, player_id")
       .eq("competition", comp)
       .eq("contest_date", p.voteDate);
     const { data: myVote } = await db
@@ -296,6 +299,7 @@ async function handleState(
         caption: s.caption,
         isOwn: s.player_id === player.id,
         image_url: await signed(s.photo_path),
+        thumb_url: s.thumb_path ? await signed(s.thumb_path) : null,
       })),
     );
     out.ballot = shuffle(ballot);
@@ -331,6 +335,24 @@ async function handleSubmit(player: { id: string }, comp: string, body: any) {
     .from(BUCKET)
     .upload(path, bytes, { contentType: "image/jpeg", upsert: true });
   if (up.error) return json({ error: up.error.message }, 500);
+
+  // Small companion thumbnail so grids/lists load fast on weak wifi. Optional
+  // and best-effort: if it's missing or fails to upload, callers just fall
+  // back to the full image.
+  let thumbPath: string | null = null;
+  const thumbDataUrl: string = body.thumb ?? "";
+  const tm = thumbDataUrl.match(/^data:(image\/\w+);base64,(.+)$/s);
+  if (tm) {
+    const thumbBytes = Uint8Array.from(atob(tm[2]), (c) => c.charCodeAt(0));
+    if (thumbBytes.length <= 2 * 1024 * 1024) {
+      const candidatePath = `${comp}/${p.submitDate}/${player.id}_thumb.jpg`;
+      const tup = await db.storage
+        .from(BUCKET)
+        .upload(candidatePath, thumbBytes, { contentType: "image/jpeg", upsert: true });
+      if (!tup.error) thumbPath = candidatePath;
+    }
+  }
+
   const caption = (body.caption ?? "").toString().slice(0, 200);
   const { error } = await db.from("submissions").upsert(
     {
@@ -338,6 +360,7 @@ async function handleSubmit(player: { id: string }, comp: string, body: any) {
       contest_date: p.submitDate,
       player_id: player.id,
       photo_path: path,
+      thumb_path: thumbPath,
       caption,
       updated_at: new Date().toISOString(),
     },
@@ -371,8 +394,8 @@ async function handleVote(player: { id: string }, comp: string, body: any) {
 
 async function handleHallOfFame(comp: string, body: any) {
   const p = phaseInfo();
-  // The winners row for "today" is finalized by cron at 12:55, but isn't announced
-  // until 1:00pm — hide it from Hall of Fame until then.
+  // The winners row for "today" is finalized by cron at 14:25, but isn't announced
+  // until 2:30pm — hide it from Hall of Fame until then.
   const hideDate = p.minutes < RESULTS_AT ? p.today : null;
 
   const seasons = await getSeasons();
@@ -413,7 +436,7 @@ async function handleAllPhotos(comp: string) {
 async function handleLeaderboard(body: any) {
   const comps = await getCompetitions();
   const p = phaseInfo();
-  // Same 1:00pm embargo as Hall of Fame — don't count today's result until it's announced.
+  // Same 2:30pm embargo as Hall of Fame — don't count today's result until it's announced.
   const hideDate = p.minutes < RESULTS_AT ? p.today : null;
 
   const seasons = await getSeasons();
@@ -484,7 +507,7 @@ async function handleAdminOverview(player: { id: string }) {
     comps.map(async (c) => {
       const { data: subs } = await db
         .from("submissions")
-        .select("id, caption, photo_path, player_id, updated_at")
+        .select("id, caption, photo_path, thumb_path, player_id, updated_at")
         .eq("competition", c.slug)
         .eq("contest_date", date);
       const entries = await Promise.all(
@@ -499,6 +522,7 @@ async function handleAdminOverview(player: { id: string }) {
             name: mem?.name ?? "Unknown",
             caption: sb.caption,
             image_url: await signed(sb.photo_path),
+            thumb_url: sb.thumb_path ? await signed(sb.thumb_path) : null,
           };
         }),
       );
@@ -516,10 +540,13 @@ async function handleAdminOverview(player: { id: string }) {
 async function handleAdminRemoveSubmission(body: any) {
   const id: string = body.submission_id;
   if (!id) return json({ error: "submission_id required" }, 400);
-  const { data: sb } = await db.from("submissions").select("id, photo_path").eq("id", id).maybeSingle();
+  const { data: sb } = await db.from("submissions").select("id, photo_path, thumb_path").eq("id", id).maybeSingle();
   if (!sb) return json({ error: "Submission not found." }, 404);
-  if (sb.photo_path && !/^https?:\/\//.test(sb.photo_path)) {
-    await db.storage.from(BUCKET).remove([sb.photo_path]);
+  const toRemove = [sb.photo_path, sb.thumb_path].filter(
+    (p): p is string => !!p && !/^https?:\/\//.test(p),
+  );
+  if (toRemove.length) {
+    await db.storage.from(BUCKET).remove(toRemove);
   }
   const { error } = await db.from("submissions").delete().eq("id", id); // votes cascade
   if (error) return json({ error: error.message }, 500);

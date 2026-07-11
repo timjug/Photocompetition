@@ -70,6 +70,13 @@ function el(html) {
 function esc(s) {
   return (s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 }
+// Renders an <img> using the low-res thumbnail when available (fast on weak
+// wifi), while keeping the full-res image one tap away via the lightbox.
+function photoImg(item) {
+  if (!item.image_url) return "";
+  const src = item.thumb_url || item.image_url;
+  return `<img src="${src}" data-full="${item.image_url}" alt="">`;
+}
 // --- lightbox: tap any photo to view it full-screen -------------------------
 let lightboxEl = null;
 function openLightbox(src) {
@@ -90,7 +97,7 @@ function closeLightbox() {
 document.addEventListener("click", (e) => {
   const img = e.target.closest("img");
   if (!img || img.closest(".tile") || img.closest(".lightbox")) return;
-  openLightbox(img.src);
+  openLightbox(img.dataset.full || img.src);
 });
 
 let toastTimer;
@@ -127,8 +134,10 @@ function votersHTML(voted, pending) {
     }`;
 }
 
-// Resize a chosen image to <=1600px longest edge, JPEG ~0.8, return data URL.
-function resizeImage(file, maxEdge = 1600, quality = 0.8) {
+// Resize a chosen image to a full-size version (<=1600px, JPEG ~0.8) and a
+// small companion thumbnail (<=480px, JPEG ~0.6) for fast loading on weak
+// wifi. Returns { full, thumb } data URLs.
+function resizeImage(file) {
   return new Promise((resolve, reject) => {
     const img = new Image();
     const reader = new FileReader();
@@ -136,14 +145,17 @@ function resizeImage(file, maxEdge = 1600, quality = 0.8) {
     reader.onerror = reject;
     img.onerror = () => reject(new Error("Could not read that image."));
     img.onload = () => {
-      const scale = Math.min(1, maxEdge / Math.max(img.width, img.height));
-      const w = Math.round(img.width * scale);
-      const h = Math.round(img.height * scale);
-      const canvas = document.createElement("canvas");
-      canvas.width = w;
-      canvas.height = h;
-      canvas.getContext("2d").drawImage(img, 0, 0, w, h);
-      resolve(canvas.toDataURL("image/jpeg", quality));
+      const draw = (maxEdge, quality) => {
+        const scale = Math.min(1, maxEdge / Math.max(img.width, img.height));
+        const w = Math.round(img.width * scale);
+        const h = Math.round(img.height * scale);
+        const canvas = document.createElement("canvas");
+        canvas.width = w;
+        canvas.height = h;
+        canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+        return canvas.toDataURL("image/jpeg", quality);
+      };
+      resolve({ full: draw(1600, 0.8), thumb: draw(480, 0.6) });
     };
     reader.readAsDataURL(file);
   });
@@ -159,7 +171,7 @@ function latestResultCard(latest) {
     .map(
       (w) => `
       <div class="winner">
-        ${w.image_url ? `<img src="${w.image_url}" alt="">` : ""}
+        ${photoImg(w)}
         <div class="meta">
           <div class="name"><span class="crown">👑</span> ${esc(w.name)}</div>
           ${w.caption ? `<div class="muted">${esc(w.caption)}</div>` : ""}
@@ -173,7 +185,7 @@ function latestResultCard(latest) {
     .map(
       (w) => `
       <div class="result-row">
-        ${w.image_url ? `<img src="${w.image_url}" alt="">` : ""}
+        ${photoImg(w)}
         <div class="result-meta">
           <div class="result-name">${esc(w.name)}</div>
           ${w.caption ? `<div class="result-caption">${esc(w.caption)}</div>` : ""}
@@ -193,9 +205,9 @@ function renderSubmit(s) {
   app.innerHTML = "";
   const has = s.yourSubmission;
   const card = el(`<div class="card">
-    <div class="banner submit">📸 Submissions are open — until 11:30am</div>
+    <div class="banner submit">📸 Submissions are open — until 1:00pm</div>
     <div class="headline">${has ? "Your photo is in!" : "Submit your photo"}</div>
-    <p class="sub">${has ? "You can replace it any time before 11:30am." : "One photo per person. You can change it until 11:30am."}</p>
+    <p class="sub">${has ? "You can replace it any time before 1:00pm." : "One photo per person. You can change it until 1:00pm."}</p>
     ${has && has.image_url ? `<img class="preview" src="${has.image_url}" alt="your photo">` : `<div id="prevWrap"></div>`}
     <label class="label-btn" for="file">${has ? "📷 Choose a different photo" : "📷 Choose a photo"}</label>
     <input type="file" id="file" accept="image/*">
@@ -213,13 +225,16 @@ function renderSubmit(s) {
   const send = card.querySelector("#send");
   const cap = card.querySelector("#cap");
   let dataUrl = null;
+  let thumbDataUrl = null;
 
   file.addEventListener("change", async () => {
     if (!file.files[0]) return;
     send.disabled = true;
     send.textContent = "Preparing…";
     try {
-      dataUrl = await resizeImage(file.files[0]);
+      const variants = await resizeImage(file.files[0]);
+      dataUrl = variants.full;
+      thumbDataUrl = variants.thumb;
       let prev = card.querySelector(".preview");
       if (!prev) {
         prev = el(`<img class="preview" alt="preview">`);
@@ -239,7 +254,7 @@ function renderSubmit(s) {
     send.disabled = true;
     send.textContent = "Uploading…";
     try {
-      await api("submit", { image: dataUrl, caption: cap.value });
+      await api("submit", { image: dataUrl, thumb: thumbDataUrl, caption: cap.value });
       toast("Photo submitted! 🎉");
       load();
     } catch (e) {
@@ -256,7 +271,7 @@ function renderVote(s) {
   if (s.votableCount === 0) {
     app.appendChild(
       el(`<div class="card center">
-        <div class="banner vote">🗳️ Voting is open — until 12:55pm</div>
+        <div class="banner vote">🗳️ Voting is open — until 2:25pm</div>
         <p class="sub">There are no other photos to vote for today.</p>
       </div>`),
     );
@@ -269,7 +284,7 @@ function renderVote(s) {
     return;
   }
   const card = el(`<div class="card">
-    <div class="banner vote">🗳️ Voting is open — until 12:55pm</div>
+    <div class="banner vote">🗳️ Voting is open — until 2:25pm</div>
     <div class="headline">Pick the best</div>
     <p class="sub" id="votestatus"></p>
     <div class="grid"></div>
@@ -306,15 +321,15 @@ function renderVote(s) {
       tag.style.display = sel || own || t.dataset.caption ? "block" : "none";
     });
     status.textContent = selected
-      ? "✓ You voted for the highlighted photo. Tap another to change it (until 12:55pm)."
-      : "Anonymous — tap a photo to vote. You can change it until 12:55pm. Winner at 1:00pm.";
+      ? "✓ You voted for the highlighted photo. Tap another to change it (until 2:25pm)."
+      : "Anonymous — tap a photo to vote. You can change it until 2:25pm. Winner at 2:30pm.";
   }
 
   ballot.forEach((b) => {
     const tile = el(`<div class="tile ${b.isOwn ? "own" : ""}" data-id="${b.id}" data-own="${
       b.isOwn ? "1" : "0"
     }" data-caption="${esc(b.caption || "")}">
-      ${b.image_url ? `<img src="${b.image_url}" alt="">` : ""}
+      ${b.image_url ? `<img src="${b.thumb_url || b.image_url}" alt="">` : ""}
       <div class="check">✓</div>
       <div class="tag"></div>
       <button class="zoom" type="button" aria-label="Zoom photo">🔍</button>
@@ -365,7 +380,7 @@ function renderResults(s) {
     app.appendChild(
       el(`<div class="card center">
         <div class="headline">No winner yet</div>
-        <p class="sub">Come back at 2:00pm to submit a photo for the next round.</p>
+        <p class="sub">Come back at 3:30pm to submit a photo for the next round.</p>
       </div>`),
     );
     return;
@@ -373,7 +388,7 @@ function renderResults(s) {
   app.insertAdjacentHTML("beforeend", latestResultCard(r));
   app.appendChild(
     el(`<div class="card center">
-      <p class="sub">Next round opens at 2:00pm. Tap 🏆 Hall of Fame to see past winners.</p>
+      <p class="sub">Next round opens at 3:30pm. Tap 🏆 Hall of Fame to see past winners.</p>
     </div>`),
   );
 }
@@ -424,7 +439,7 @@ async function renderHallOfFame() {
         ${actualWinners
           .map(
             (w) => `<div class="winner">
-              ${w.image_url ? `<img src="${w.image_url}" alt="">` : ""}
+              ${photoImg(w)}
               <div class="meta">
                 <div class="name"><span class="crown">👑</span> ${esc(w.name)}</div>
                 ${w.caption ? `<div class="muted">${esc(w.caption)}</div>` : ""}
@@ -493,7 +508,7 @@ async function load() {
     whoEl.textContent = s.you ? `Hi, ${s.you.name}` : "";
     if (s.phase === "submit") renderSubmit(s);
     else if (s.phase === "vote") renderVote(s);
-    else if (s.phase === "tallying") renderWaiting("Counting votes", "Results at 1:00pm.", s);
+    else if (s.phase === "tallying") renderWaiting("Counting votes", "Results at 2:30pm.", s);
     else renderResults(s);
   } catch (e) {
     app.innerHTML = `<div class="card center"><p class="sub">${esc(e.message)}</p></div>`;
@@ -581,7 +596,7 @@ async function renderGallery() {
         ${d.winners
           .map(
             (w) => `<div class="result-row">
-              ${w.image_url ? `<img src="${w.image_url}" alt="">` : ""}
+              ${photoImg(w)}
               <div class="result-meta">
                 <div class="result-name">${w.isWinner ? "👑 " : ""}${esc(w.name)}</div>
                 ${w.caption ? `<div class="result-caption">${esc(w.caption)}</div>` : ""}
@@ -621,7 +636,7 @@ async function renderAdmin() {
     if (c.entries.length === 0) card.appendChild(el(`<p class="sub">No entries yet.</p>`));
     c.entries.forEach((en) => {
       const row = el(`<div class="adm-row">
-        ${en.image_url ? `<img src="${en.image_url}" alt="">` : `<div class="adm-noimg"></div>`}
+        ${en.image_url ? photoImg(en) : `<div class="adm-noimg"></div>`}
         <div class="adm-meta"><div class="name">${esc(en.name)}</div>${
         en.caption ? `<div class="muted">${esc(en.caption)}</div>` : ""
       }</div>
